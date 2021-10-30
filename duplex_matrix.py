@@ -1,14 +1,11 @@
 import digitalio
 from kmk.kmk_keyboard import KMKKeyboard
-from kmk.matrix import MatrixScanner, DiodeOrientation, intify_coordinate
+from kmk.matrix import DiodeOrientation, intify_coordinate
 from kmk.hid import HIDModes
 
+
 class DuplexMatrixScanner:
-    def __init__(
-        self,
-        cols,
-        rows
-    ):
+    def __init__(self, cols, rows):
         """Constructor
 
         Args:
@@ -42,15 +39,11 @@ class DuplexMatrixScanner:
         del unique_pins
 
         self.io_cols = [
-            x
-            if x.__class__.__name__ == 'DigitalInOut'
-            else digitalio.DigitalInOut(x)
+            x if x.__class__.__name__ == 'DigitalInOut' else digitalio.DigitalInOut(x)
             for x in cols
         ]
         self.io_rows = [
-            x
-            if x.__class__.__name__ == 'DigitalInOut'
-            else digitalio.DigitalInOut(x)
+            x if x.__class__.__name__ == 'DigitalInOut' else digitalio.DigitalInOut(x)
             for x in rows
         ]
 
@@ -59,12 +52,12 @@ class DuplexMatrixScanner:
         self.report = bytearray(3)
 
     def scan_for_changes(self):
-        '''
+        """
         Poll the matrix for changes and return either None (if nothing updated)
         or a bytearray (reused in later runs so copy this if you need the raw
         array itself for some crazy reason) consisting of (row, col, pressed)
         which are (int, int, bool)
-        '''
+        """
         ba_idx = 0
         any_changed = False
         row_index_offset = 0
@@ -131,9 +124,9 @@ class KMKKeyboardDuplexMatrix(KMKKeyboard):
     matrix_scanner = DuplexMatrixScanner
 
     def _init_sanity_check(self):
-        '''
+        """
         Ensure the provided configuration is *probably* bootable
-        '''
+        """
         assert self.keymap, 'must define a keymap with at least one row'
         assert self.row_pins, 'no GPIO pins defined for matrix rows'
         assert self.col_pins, 'no GPIO pins defined for matrix columns'
@@ -145,14 +138,14 @@ class KMKKeyboardDuplexMatrix(KMKKeyboard):
         return self
 
     def _init_coord_mapping(self):
-        '''
+        """
         Attempt to sanely guess a coord_mapping if one is not provided. No-op
         if `kmk.extensions.split.Split` is used, it provides equivalent
         functionality in `on_bootup`
 
         To save RAM on boards that don't use Split, we don't import Split
         and do an isinstance check, but instead do string detection
-        '''
+        """
         if any(x.__class__.__module__ == 'kmk.modules.split' for x in self.modules):
             return
 
@@ -169,8 +162,5 @@ class KMKKeyboardDuplexMatrix(KMKKeyboard):
                         self.coord_mapping.append(intify_coordinate(new_ridx, cidx))
 
     def _init_matrix(self):
-        self.matrix = DuplexMatrixScanner(
-            cols=self.col_pins,
-            rows=self.row_pins
-        )
+        self.matrix = DuplexMatrixScanner(cols=self.col_pins, rows=self.row_pins)
         return self
