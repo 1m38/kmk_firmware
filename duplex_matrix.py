@@ -6,22 +6,19 @@ from kmk.hid import HIDModes
 class DuplexMatrixScanner:
     def __init__(
         self,
-        cols,   # list of lists of col_pins
-        rows,   # list of lists of row_pins
-        diode_orientations=(DiodeOrientation.COLUMNS, DiodeOrientation.ROWS)
+        cols,
+        rows
     ):
         """Constructor
 
         Args:
-            cols: list of lists of col_pins (dimensions of all lists of col_pins must be the same)
-            rows: list of lists of row_pins
-            diode_directions: list of diode directions
+            cols: list of col_pins
+            rows: list of row_pins
 
         Example:
             If arguments are belows:
-                cols = [[PIN1, PIN2], [PIN1, PIN2]],
-                rows = [[PIN3, PIN4], [PIN3, PIN4]],
-                diode_directions = [DiodeOrientation.COLUMNS, DiodeOrientation.ROWS]
+                cols = (PIN1, PIN2)
+                rows = (PIN3, PIN4)
             then, the keymap definition (and wirings) looks like this:
                 [
                 #   PIN1  PIN2
@@ -31,44 +28,33 @@ class DuplexMatrixScanner:
                     key7, key8      # PIN4 (ROW2COL)
                 ]
         """
-        assert len(cols) == len(rows) == len(diode_orientations), "cols, rows and diode_orientations must be the same"
-
-        self.lens_cols = (len(l) for l in cols)
-        self.lens_rows = (len(l) for l in rows)
+        self.len_cols = len(cols)
+        self.len_rows = len(rows)
 
         # A pin cannot be both a row and column, detect this by combining the
         # two tuples into a set and validating that the length did not drop
         #
         # repr() hackery is because CircuitPython Pin objects are not hashable
-        for c, r in zip(cols, rows):
-            unique_pins = {repr(p) for p in c} | {repr(p) for p in r}
-            assert (
-                len(unique_pins) == len(c) + len(r)
-            ), 'Cannot use a pin as both a column and row'
-            del unique_pins
+        unique_pins = {repr(c) for c in cols} | {repr(r) for r in rows}
+        assert (
+            len(unique_pins) == self.len_cols + self.len_rows
+        ), 'Cannot use a pin as both a column and row'
+        del unique_pins
 
-        self.diode_orientations = diode_orientations
-
-        for o in self.diode_orientations:
-            assert o in (DiodeOrientation.COLUMNS, DiodeOrientation.ROWS), "Invalid DiodeOrientation {}".format(o)
-
-        ios = {}
-        for cols_or_rows in (cols, rows):
-            for pins in cols_or_rows:
-                for pin in pins:
-                    if repr(pin) in ios.keys():
-                        continue
-                    ios[repr(pin)] = digitalio.DigitalInOut(pin)
-        self.ios_cols = [
-            [ ios[repr(pin)] for pin in pins ]
-            for pins in cols
+        self.io_cols = [
+            x
+            if x.__class__.__name__ == 'DigitalInOut'
+            else digitalio.DigitalInOut(x)
+            for x in cols
         ]
-        self.ios_rows = [
-            [ ios[repr(pin)] for pin in pins ]
-            for pins in rows
+        self.io_rows = [
+            x
+            if x.__class__.__name__ == 'DigitalInOut'
+            else digitalio.DigitalInOut(x)
+            for x in rows
         ]
 
-        self.len_state_arrays = sum(c * r for c, r in zip(self.lens_cols, self.lens_rows))
+        self.len_state_arrays = self.len_cols * self.len_rows * 2
         self.state = bytearray(self.len_state_arrays)
         self.report = bytearray(3)
 
@@ -83,15 +69,13 @@ class DuplexMatrixScanner:
         any_changed = False
         row_index_offset = 0
 
-        for io_cols, io_rows, diode_orientation in zip(self.ios_cols, self.ios_rows, self.diode_orientations):
+        for diode_orientation in (DiodeOrientation.COLUMNS, DiodeOrientation.ROWS):
             if diode_orientation == DiodeOrientation.COLUMNS:
-                outputs = io_cols
-                inputs = io_rows
+                outputs = self.io_cols
+                inputs = self.io_rows
             elif diode_orientation == DiodeOrientation.ROWS:
-                outputs = io_rows
-                inputs = io_cols
-            else:
-                raise ValueError("Invalid DiodeOrientation {}".format(diode_orientation))
+                outputs = self.io_rows
+                inputs = self.io_cols
             for oidx, opin in enumerate(outputs):
                 opin.switch_to_output(value=True)
 
@@ -120,8 +104,6 @@ class DuplexMatrixScanner:
                         elif diode_orientation == DiodeOrientation.ROWS:
                             self.report[0] = oidx
                             self.report[1] = iidx
-                        else:
-                            raise ValueError("Invalid DiodeOrientation {}".format(diode_orientation))
                         # offset row index for duplex matrix tables
                         self.report[0] += row_index_offset
 
@@ -139,27 +121,23 @@ class DuplexMatrixScanner:
 
             if any_changed:
                 break
-            row_index_offset += len(io_rows)
+            row_index_offset += len(self.io_rows)
 
         if any_changed:
             return self.report
 
 
 class KMKKeyboardDuplexMatrix(KMKKeyboard):
-    diode_orientations = None
     matrix_scanner = DuplexMatrixScanner
-    rows_pins = None
-    cols_pins = None
 
     def _init_sanity_check(self):
         '''
         Ensure the provided configuration is *probably* bootable
         '''
         assert self.keymap, 'must define a keymap with at least one row'
-        assert self.rows_pins, 'no GPIO pins defined for matrix rows'
-        assert self.cols_pins, 'no GPIO pins defined for matrix columns'
-        # assert self.diode_orientation is not None, 'diode orientation must be defined'
-        assert self.diode_orientations is not None, 'diode orientations must be defined'
+        assert self.row_pins, 'no GPIO pins defined for matrix rows'
+        assert self.col_pins, 'no GPIO pins defined for matrix columns'
+        # skip diode_orientation check
         assert (
             self.hid_type in HIDModes.ALL_MODES
         ), 'hid_type must be a value from kmk.consts.HIDModes'
@@ -180,18 +158,19 @@ class KMKKeyboardDuplexMatrix(KMKKeyboard):
 
         if not self.coord_mapping:
             self.coord_mapping = []
-            row_index_offset = 0
 
-            for row_pins, col_pins in zip(self.rows_pins, self.cols_pins):
-                for ridx in range(len(row_pins)):
-                    for cidx in range(len(col_pins)):
-                        self.coord_mapping.append(intify_coordinate(ridx + row_index_offset, cidx))
-                row_index_offset += len(row_pins)
+            rows_to_calc = len(self.row_pins)
+            cols_to_calc = len(self.col_pins)
+
+            for dup in range(2):
+                for ridx in range(rows_to_calc):
+                    for cidx in range(cols_to_calc):
+                        new_ridx = ridx + rows_to_calc * dup
+                        self.coord_mapping.append(intify_coordinate(new_ridx, cidx))
 
     def _init_matrix(self):
         self.matrix = DuplexMatrixScanner(
-            cols=self.cols_pins,
-            rows=self.rows_pins,
-            diode_orientations=self.diode_orientations
+            cols=self.col_pins,
+            rows=self.row_pins
         )
         return self
