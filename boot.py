@@ -7,7 +7,7 @@ import storage
 import board
 import digitalio
 
-def storage_control(pin_in, pin_out=None, pull=digitalio.Pull.UP):
+def storage_control(pin_in, pin_out=None, pull=digitalio.Pull.DOWN):
     """Disable USB Drive if the switch is pressed when power on.
 
     Args:
@@ -33,4 +33,5 @@ def storage_control(pin_in, pin_out=None, pull=digitalio.Pull.UP):
     if io_out is not None:
         io_out.deinit()
 
-storage_control(board.GP3, board.GP6, digitalio.Pull.UP)
+# Pressing Q key when power on to enable USB Drive
+# storage_control(board.D4, board.D1, digitalio.Pull.DOWN)
